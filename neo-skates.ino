@@ -2,12 +2,16 @@
 #include <FastLED.h>
 
 #define FORCE_SCALING 200
-#define FORCE_RESISTANCE 2000
+#define FORCE_RESISTANCE 1000
 #define FORCE_THRESHOLD 5000
-#define COOLDOWN_TIME 50
+#define STOMP_THRESHOLD 60
+#define COOLDOWN_TIME 150
+#define DECAY_RATE 2
+#define HUE_ROTATION 90
+#define MAX_LUMINANCE 300
+#define LUMINANCE_SLEW_LIMIT 10 // How quickly can we get brighter?
 
 #define LED_COUNT 8
-#define MAX_BRIGHT 255
 #define NEOPIXEL_PIN 7
 #define MEMORY_DEPTH 1
 
@@ -15,11 +19,6 @@ const int MPU_ADDR = 0x68;
 int16_t accelX, accelY, accelZ; // variables for accelerometer raw data
 int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
 char tmp_str[7]; // temporary variable used in convert function
-
-char* convert_int16_to_str(int16_t i) { // converts int16 to string. Moreover, resulting strings will have the same length in the debug monitor.
-  sprintf(tmp_str, "%6d", i);
-  return tmp_str;
-}
 
 CRGB leds[LED_COUNT];
 
@@ -34,24 +33,21 @@ int luminance = 0;
 
 float rho;
 float theta;
+long theta_l;
 byte theta8bit;
 byte thetas[MEMORY_DEPTH];
 byte cooldown = 0;
 
-void setup() {
-  Serial.begin(115200);
-  Wire.begin();
-  Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
-  Wire.write(0x6B); // PWR_MGMT_1 register
-  Wire.write(0); // set to zero (wakes up the MPU-6050)
-  Wire.endTransmission(true);
-
-  FastLED.addLeds<NEOPIXEL, NEOPIXEL_PIN>(leds, LED_COUNT);
-}
 
 void showHSV(CHSV color) {
     fill_solid( &(leds[0]), LED_COUNT, color);
     FastLED.show();
+}
+
+void stomp() {
+  for (int i=255; i>0; i -= 2) {
+    showHSV(CHSV(200, 200, i)); // Bright pink
+  }
 }
 
 void debugFloat(char* label, float value) {
@@ -72,6 +68,26 @@ void debugByte(char* label, byte value) {
   }
 }
 
+void debugInt(char* label, int value) {
+  if(loopCounter == 0) {
+    Serial.print(label);
+    Serial.print(":");
+    Serial.print(value);
+    Serial.print("\t");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  Wire.beginTransmission(MPU_ADDR); // Begins a transmission to the I2C slave (GY-521 board)
+  Wire.write(0x6B); // PWR_MGMT_1 register
+  Wire.write(0); // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+
+  FastLED.addLeds<NEOPIXEL, NEOPIXEL_PIN>(leds, LED_COUNT);
+}
+
 void loop() {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H) [MPU-6000 and MPU-6050 Register Map and Descriptions Revision 4.2, p.40]
@@ -90,30 +106,16 @@ void loop() {
   int yAccelScaled = accelY / FORCE_SCALING;
   int zAccelScaled = ((accelZ + 16000) / FORCE_SCALING);
 
-  //if (abs(xAccelScaled) > 30 && blue < MAX_BRIGHT) {
-  //  blue += abs(xAccelScaled) / 20;
-  //}
-
-  // blue += xAccelScaled;
-  // red  -= xAccelScaled;
-  //Serial.print(convert_int16_to_str(blue));
-  //Serial.print(convert_int16_to_str(xAccelScaled));
-  //Serial.print(convert_int16_to_str(yAccelScaled));
-  //Serial.print(convert_int16_to_str(zAccelScaled));
-
-  //Serial.print(accelX);
-  //Serial.print("\t");
-  //Serial.print(accelY);
-  //Serial.print("\t");
-
   rho = sqrt(pow(accelX, 2) + pow(accelY, 2));
   //debugFloat("rho", rho);
 
-  //theta = atan(float(accelY) / float(accelX));
-  theta = atan2(float(accelY), float(accelX));
-  theta *= 57.2957795;
-  debugFloat("theta_raw", theta);
+  theta = atan2(float(accelY), float(accelX)) * 57.2957795;
+  //debugFloat("theta_raw", theta);
   if (theta < 0) {theta += 360;}
+  theta += HUE_ROTATION;
+  if (theta > 360) {
+    theta -= 360;
+  }
 
   // if(loopCounter == 0) {
   //   Serial.print("x:");
@@ -127,40 +129,29 @@ void loop() {
   //   Serial.print("\t");
   // }
 
-  theta /= 1.40625;
   // Serial.print("rho:");
   // Serial.print(rho);
   // Serial.print("\t");
   // Serial.print(theta);
 
-  //if (abs(yAccelScaled) > 30 && red < MAX_BRIGHT) {
-  //  red += abs(yAccelScaled) / 20;
-  //}
-
-  //if (abs(zAccelScaled) > 30 && green < MAX_BRIGHT) {
-  //  green += abs(zAccelScaled) / 20;
-  //}
-
-  thetas[loopCounter] = theta;
-  loopCounter++;
   if (loopCounter == MEMORY_DEPTH) {
     loopCounter = 0;
   }
 
   if (rho > FORCE_THRESHOLD) {
-    luminance += rho / FORCE_RESISTANCE;
+    luminance += max((rho / FORCE_RESISTANCE), LUMINANCE_SLEW_LIMIT);
 
     if (cooldown == 0) {
-      hue = theta;
-      cooldown = COOLDOWN_TIME;
+      hue = theta / 1.40625; // Degrees (360) to 8-bit (256).
+      cooldown = COOLDOWN_TIME; // Restart the colour change cooldown timer.
     }
   }
 
   // Normalize
-  luminance = min(luminance, 255);
-  luminance = max(luminance - 2, 0);
+  luminance = min(luminance, MAX_LUMINANCE);
+  luminance = max(luminance - DECAY_RATE, 0);
   if (cooldown > 0) {cooldown -= 1;}
-  debugByte("cooldown", cooldown);
+  //debugByte("cooldown", cooldown);
 
   // Take the average angle as the color hue;
   //hue = 0;
@@ -169,16 +160,13 @@ void loop() {
   //}
   //hue = hue / MEMORY_DEPTH;
 
-  showHSV(CHSV(hue, 255, max(luminance, 1)));
+  showHSV(CHSV(hue, 255, min(max(luminance, 1), 255)));
 
-  if(loopCounter == 0) {
-  FastLED.show();
-  Serial.print("hue:");
-  Serial.print(hue);
-  Serial.print("\t");
-  Serial.print("luminance:");
-  Serial.print(luminance);
-  Serial.print("\t");
-  Serial.println("");
+  // Flash on stomp.
+  debugInt("stompyness", zAccelScaled);
+  if (zAccelScaled < -STOMP_THRESHOLD) {
+    stomp();
   }
+
+  Serial.println("");
 }
