@@ -3,34 +3,35 @@
 
 #define FORCE_SCALING 200
 #define FORCE_RESISTANCE 1000
-#define FORCE_THRESHOLD 6000
+#define FORCE_THRESHOLD 4000
 #define STOMP_THRESHOLD 80
 #define COOLDOWN_TIME 150
 #define DECAY_RATE 2
 #define HUE_ROTATION 270
 #define MAX_LUMINANCE 300
-#define LUMINANCE_SLEW_LIMIT 5 // How quickly can we get brighter?
+#define LUMINANCE_SLEW_LIMIT 10 // How quickly can we get brighter?
 
 #define LED_COUNT 8
 #define NEOPIXEL_PIN 7
-#define MEMORY_DEPTH 196
+#define MEMORY_DEPTH 24
 
 const int MPU_ADDR = 0x68;
 int16_t accelX, accelY, accelZ; // variables for accelerometer raw data
 int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
 
-int xAccelScaled;
-int yAccelScaled;
-int zAccelScaled;
-
 int xSamples[MEMORY_DEPTH];
 int ySamples[MEMORY_DEPTH];
 int zSamples[MEMORY_DEPTH];
+int xAvg;
+int yAvg;
+int zAvg;
+
 unsigned int clock = 0;
 
 float rho;
 float theta;
 int hue = 0;
+int targetHue = 0;
 int saturation = 255;
 int luminance = 0;
 int cooldown = 0;
@@ -99,25 +100,25 @@ void loop() {
   //gyro_y = Wire.read() << 8 | Wire.read(); // reading registers: 0x45 (GYRO_YOUT_H) and 0x46 (GYRO_YOUT_L)
   //gyro_z = Wire.read() << 8 | Wire.read(); // reading registers: 0x47 (GYRO_ZOUT_H) and 0x48 (GYRO_ZOUT_L)
 
-  xSamples[clock % MEMORY_DEPTH] = accelX / FORCE_SCALING;
-  ySamples[clock % MEMORY_DEPTH] = accelY / FORCE_SCALING;
-  zSamples[clock % MEMORY_DEPTH] = ((accelZ + 16000) / FORCE_SCALING);
+  xSamples[clock % MEMORY_DEPTH] = accelX;
+  ySamples[clock % MEMORY_DEPTH] = accelY;
+  zSamples[clock % MEMORY_DEPTH] = accelZ;
 
-  xAccelScaled = 0;
-  yAccelScaled = 0;
-  zAccelScaled = 0;
+  xAvg = 0;
+  yAvg = 0;
+  zAvg = 0;
   for (byte i=0; i<MEMORY_DEPTH; i++) {
-    xAccelScaled += xSamples[i];
-    yAccelScaled += ySamples[i];
-    zAccelScaled += zSamples[i];
+    xAvg += xSamples[i] / MEMORY_DEPTH;
+    yAvg += ySamples[i] / MEMORY_DEPTH;
+    zAvg += zSamples[i] / MEMORY_DEPTH;
   }
-  xAccelScaled /= MEMORY_DEPTH;
-  yAccelScaled /= MEMORY_DEPTH;
-  zAccelScaled /= MEMORY_DEPTH;
 
-  rho = sqrt(pow(accelX, 2) + pow(accelY, 2));
+  //debugInt("rawX", accelX);
+  //debugInt("avgX", xAvg);
 
-  theta = atan2(float(accelY), float(accelX)) * 57.2957795;
+  rho = sqrt(pow(xAvg, 2) + pow(yAvg, 2));
+
+  theta = atan2(float(yAvg), float(xAvg)) * 57.2957795;
   if (theta < 0) {theta += 360;}
   theta += HUE_ROTATION;
   if (theta > 360) {
@@ -134,20 +135,23 @@ void loop() {
   }
 
   cooldown = max(cooldown-1, 0);
-  debugByte("cooldown", cooldown);
+  //debugByte("cooldown", cooldown);
 
   // Normalize
   luminance = min(luminance, MAX_LUMINANCE);
   luminance = max(luminance - DECAY_RATE, 0);
+  if(luminance == 0) {cooldown = 0;}
 
   showHSV(CHSV(hue, saturation, min(max(luminance, 1), 255)));
 
   // Flash on stomp.
-  //debugInt("stompyness", zAccelScaled);
-  //if (zAccelScaled < -STOMP_THRESHOLD) {
+  //debugInt("stompyness", zAvg);
+  //if (zAvg < -STOMP_THRESHOLD) {
   //  stomp();
   //}
 
+  debugInt("hue", hue);
+  debugInt("luminance", luminance);
   Serial.println("");
   clock++;
 }
