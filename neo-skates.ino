@@ -18,26 +18,16 @@
 const int MPU_ADDR = 0x68;
 int16_t accelX, accelY, accelZ; // variables for accelerometer raw data
 int16_t gyro_x, gyro_y, gyro_z; // variables for gyro raw data
-char tmp_str[7]; // temporary variable used in convert function
 
-CRGB leds[LED_COUNT];
-
-int red = 0;
-int green = 0;
-int blue = 0;
-int loopCounter = 0;
-
-int hue = 0;
-int saturation = 0;
-int luminance = 0;
-
+int xAccelScaled;
+int yAccelScaled;
+int zAccelScaled;
 float rho;
 float theta;
-long theta_l;
-byte theta8bit;
-byte thetas[MEMORY_DEPTH];
+int hue = 0;
+int luminance = 0;
 byte cooldown = 0;
-
+CRGB leds[LED_COUNT];
 
 void showHSV(CHSV color) {
     fill_solid( &(leds[0]), LED_COUNT, color);
@@ -51,30 +41,24 @@ void stomp() {
 }
 
 void debugFloat(char* label, float value) {
-  if(loopCounter == 0) {
-    Serial.print(label);
-    Serial.print(":");
-    Serial.print(value);
-    Serial.print("\t");
-  }
+  Serial.print(label);
+  Serial.print(":");
+  Serial.print(value);
+  Serial.print("\t");
 }
 
 void debugByte(char* label, byte value) {
-  if(loopCounter == 0) {
-    Serial.print(label);
-    Serial.print(":");
-    Serial.print(value);
-    Serial.print("\t");
-  }
+  Serial.print(label);
+  Serial.print(":");
+  Serial.print(value);
+  Serial.print("\t");
 }
 
 void debugInt(char* label, int value) {
-  if(loopCounter == 0) {
-    Serial.print(label);
-    Serial.print(":");
-    Serial.print(value);
-    Serial.print("\t");
-  }
+  Serial.print(label);
+  Serial.print(":");
+  Serial.print(value);
+  Serial.print("\t");
 }
 
 void setup() {
@@ -110,32 +94,10 @@ void loop() {
   //debugFloat("rho", rho);
 
   theta = atan2(float(accelY), float(accelX)) * 57.2957795;
-  //debugFloat("theta_raw", theta);
   if (theta < 0) {theta += 360;}
   theta += HUE_ROTATION;
   if (theta > 360) {
     theta -= 360;
-  }
-
-  // if(loopCounter == 0) {
-  //   Serial.print("x:");
-  //   Serial.print(accelX);
-  //   Serial.print("\t");
-  //   Serial.print("y:");
-  //   Serial.print(accelY);
-  //   Serial.print("\t");
-  //   Serial.print("thetaQ:");
-  //   Serial.print(theta);
-  //   Serial.print("\t");
-  // }
-
-  // Serial.print("rho:");
-  // Serial.print(rho);
-  // Serial.print("\t");
-  // Serial.print(theta);
-
-  if (loopCounter == MEMORY_DEPTH) {
-    loopCounter = 0;
   }
 
   if (rho > FORCE_THRESHOLD) {
